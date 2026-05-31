@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Store Intelligence
 
 This repository implements a working Store Intelligence pipeline from raw CCTV clips to a live metrics API.
@@ -106,3 +107,6 @@ The live dashboard is available at:
 http://localhost:8000/dashboard
 
 
+=======
+# StoreIntelligence
+>>>>>>> 5f6da28890046b3c07aaba67cb63cc4ab75e47c0
