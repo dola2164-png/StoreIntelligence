@@ -244,5 +244,5 @@ A visitor is marked **converted** if:
 
 - that an event schema should prioritize session semantics,
 - and that SQLite was a suitable production-aware persistence layer.
-
+## AI Suggestions I Agreed With vs. Overrode
 I intentionally overrode any AI recommendation that would add unnecessary model complexity in favor of a working, containerized system.
