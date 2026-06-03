@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 
 class SimpleTracker:
@@ -6,6 +6,7 @@ class SimpleTracker:
         self.next_id = 1
         self.objects: Dict[int, Tuple[int, int, int, int]] = {}
         self.last_seen: Dict[int, int] = {}
+        self.lost_objects: Dict[int, Dict[str, Any]] = {}
         self.max_distance = max_distance
         self.max_lost = max_lost
 
@@ -34,8 +35,22 @@ class SimpleTracker:
                     best_dist = dist
                     best_id = obj_id
             if best_id is None:
-                assigned_id = self.next_id
-                self.next_id += 1
+                # Attempt a simple re-ID against recently lost tracks
+                for obj_id, lost in list(self.lost_objects.items()):
+                    if frame_index - lost['last_seen'] > self.max_lost * 4:
+                        del self.lost_objects[obj_id]
+                        continue
+                    existing_centroid = self._centroid(lost['box'])
+                    dist = self._distance(centroid, existing_centroid)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_id = obj_id
+                if best_id is None:
+                    assigned_id = self.next_id
+                    self.next_id += 1
+                else:
+                    assigned_id = best_id
+                    del self.lost_objects[best_id]
                 self.objects[assigned_id] = box
                 self.last_seen[assigned_id] = frame_index
                 assigned[assigned_id] = box
@@ -47,6 +62,10 @@ class SimpleTracker:
 
         for obj_id in list(remaining):
             if frame_index - self.last_seen.get(obj_id, frame_index) > self.max_lost:
+                self.lost_objects[obj_id] = {
+                    'box': self.objects[obj_id],
+                    'last_seen': self.last_seen[obj_id],
+                }
                 del self.objects[obj_id]
                 del self.last_seen[obj_id]
 

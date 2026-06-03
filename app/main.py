@@ -8,6 +8,7 @@ import uuid
 
 from . import analytics
 from .db import init_db
+from .exceptions import ServiceUnavailable
 from .schemas import EventIn, EventIngestResult, ErrorResponse
 from .storage import insert_events, fetch_events, get_last_event_timestamp
 
@@ -29,6 +30,8 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 async def add_trace_id(request: Request, call_next):
     trace_id = request.headers.get('X-Request-ID', str(uuid.uuid4()))
     request.state.trace_id = trace_id
+    request.state.store_id = None
+    request.state.event_count = 0
     start = time.time()
     response = await call_next(request)
     latency_ms = int((time.time() - start) * 1000)
@@ -37,6 +40,8 @@ async def add_trace_id(request: Request, call_next):
             'trace_id': trace_id,
             'path': request.url.path,
             'method': request.method,
+            'store_id': getattr(request.state, 'store_id', None),
+            'event_count': getattr(request.state, 'event_count', 0),
             'status_code': response.status_code,
             'latency_ms': latency_ms,
         }
@@ -66,6 +71,9 @@ async def ingest_events(request: Request):
         items = payload
     else:
         raise HTTPException(status_code=400, detail='events must be a list or JSONL lines')
+    request.state.event_count = len(items)
+    if items and isinstance(items, list) and isinstance(items[0], dict):
+        request.state.store_id = items[0].get('store_id')
 
     accepted = 0
     duplicates = 0
@@ -96,22 +104,26 @@ async def ingest_events(request: Request):
 
 
 @app.get('/stores/{store_id}/metrics')
-def get_store_metrics(store_id: str):
+def get_store_metrics(store_id: str, request: Request):
+    request.state.store_id = store_id
     return analytics.build_metrics(store_id)
 
 
 @app.get('/stores/{store_id}/funnel')
-def get_store_funnel(store_id: str):
+def get_store_funnel(store_id: str, request: Request):
+    request.state.store_id = store_id
     return analytics.build_funnel(store_id)
 
 
 @app.get('/stores/{store_id}/heatmap')
-def get_store_heatmap(store_id: str):
+def get_store_heatmap(store_id: str, request: Request):
+    request.state.store_id = store_id
     return analytics.build_heatmap(store_id)
 
 
 @app.get('/stores/{store_id}/anomalies')
-def get_store_anomalies(store_id: str):
+def get_store_anomalies(store_id: str, request: Request):
+    request.state.store_id = store_id
     return analytics.build_anomalies(store_id)
 
 
@@ -130,7 +142,18 @@ def get_dashboard():
       </head>
       <body>
         <h1>Store Intelligence Dashboard</h1>
-        <p>Use the controls below to fetch live metrics and anomaly data for STORE_BLR_002.</p>
+        <p>Live dashboard for store <strong>ST1008</strong>. Use the buttons below to fetch metrics and anomalies from the local API.</p>
+        <div class="card">
+          <h2>Live API endpoints</h2>
+          <p>
+            <a href="/dashboard" target="_blank">http://localhost:8000/dashboard</a><br>
+            <a href="/health" target="_blank">http://localhost:8000/health</a><br>
+            <a href="/stores/ST1008/metrics" target="_blank">http://localhost:8000/stores/ST1008/metrics</a><br>
+            <a href="/stores/ST1008/funnel" target="_blank">http://localhost:8000/stores/ST1008/funnel</a><br>
+            <a href="/stores/ST1008/heatmap" target="_blank">http://localhost:8000/stores/ST1008/heatmap</a><br>
+            <a href="/stores/ST1008/anomalies" target="_blank">http://localhost:8000/stores/ST1008/anomalies</a>
+          </p>
+        </div>
         <div class="card">
           <button onclick="loadMetrics()">Load Metrics</button>
           <pre id="metrics">Ready</pre>
@@ -138,6 +161,10 @@ def get_dashboard():
         <div class="card">
           <button onclick="loadFunnel()">Load Funnel</button>
           <pre id="funnel">Ready</pre>
+        </div>
+        <div class="card">
+          <button onclick="loadHeatmap()">Load Heatmap</button>
+          <pre id="heatmap">Ready</pre>
         </div>
         <div class="card">
           <button onclick="loadAnomalies()">Load Anomalies</button>
@@ -148,28 +175,36 @@ def get_dashboard():
           <pre id="health">Ready</pre>
         </div>
         <script>
+          const baseUrl = window.location.origin;
+          const storeId = 'ST1008';
+
           async function fetchJson(path) {
             const res = await fetch(path);
             return res.json();
           }
           async function loadMetrics() {
             document.getElementById('metrics').textContent = 'Loading...';
-            const data = await fetchJson('/stores/STORE_BLR_002/metrics');
+            const data = await fetchJson(`${baseUrl}/stores/${storeId}/metrics`);
             document.getElementById('metrics').textContent = JSON.stringify(data, null, 2);
           }
           async function loadFunnel() {
             document.getElementById('funnel').textContent = 'Loading...';
-            const data = await fetchJson('/stores/STORE_BLR_002/funnel');
+            const data = await fetchJson(`${baseUrl}/stores/${storeId}/funnel`);
             document.getElementById('funnel').textContent = JSON.stringify(data, null, 2);
+          }
+          async function loadHeatmap() {
+            document.getElementById('heatmap').textContent = 'Loading...';
+            const data = await fetchJson(`${baseUrl}/stores/${storeId}/heatmap`);
+            document.getElementById('heatmap').textContent = JSON.stringify(data, null, 2);
           }
           async function loadAnomalies() {
             document.getElementById('anomalies').textContent = 'Loading...';
-            const data = await fetchJson('/stores/STORE_BLR_002/anomalies');
+            const data = await fetchJson(`${baseUrl}/stores/${storeId}/anomalies`);
             document.getElementById('anomalies').textContent = JSON.stringify(data, null, 2);
           }
           async function loadHealth() {
             document.getElementById('health').textContent = 'Loading...';
-            const data = await fetchJson('/health');
+            const data = await fetchJson(`${baseUrl}/health`);
             document.getElementById('health').textContent = JSON.stringify(data, null, 2);
           }
         </script>
@@ -185,7 +220,10 @@ def get_health():
 
 @app.exception_handler(HTTPException)
 def http_error_handler(request: Request, exc: HTTPException):
+    content = {'detail': exc.detail}
+    if exc.status_code == 503:
+        content['error'] = 'SERVICE_UNAVAILABLE'
     return JSONResponse(
         status_code=exc.status_code,
-        content={'detail': exc.detail},
+        content=content,
     )

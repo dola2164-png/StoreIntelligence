@@ -1,33 +1,37 @@
 {
-  "store_id": "STORE_BLR_002",
-  "name": "Bangalore Flagship",
-  "camera_mapping": {
-    "CAM 1.mp4": "CAM_ENTRY_01",
-    "CAM 2.mp4": "CAM_ENTRY_02",
-    "CAM 3.mp4": "CAM_MAIN_01",
-    "CAM 4.mp4": "CAM_MAIN_02",
-    "CAM 5.mp4": "CAM_BILLING_01"
-  },
-  "zones": [
+  "default_store_id": "ST1008",
+  "stores": [
     {
-      "zone_id": "MAIN_FLOOR",
-      "name": "Main Floor"
+      "directory": "Store 1",
+      "store_id": "ST1008",
+      "camera_mapping": {
+        "CAM 1 - zone.mp4": "CAM_1_ZONE",
+        "CAM 2 - zone.mp4": "CAM_2_ZONE",
+        "CAM 3 - entry.mp4": "CAM_3_ENTRY",
+        "CAM 5 - billing.mp4": "CAM_5_BILLING"
+      },
+      "camera_roles": {
+        "CAM 1 - zone.mp4": "floor",
+        "CAM 2 - zone.mp4": "floor",
+        "CAM 3 - entry.mp4": "entry",
+        "CAM 5 - billing.mp4": "billing"
+      }
     },
     {
-      "zone_id": "SKINCARE",
-      "name": "Skincare"
-    },
-    {
-      "zone_id": "COSMETICS",
-      "name": "Cosmetics"
-    },
-    {
-      "zone_id": "BILLING",
-      "name": "Billing Zone"
+      "directory": "Store 2",
+      "store_id": "ST1008",
+      "camera_mapping": {
+        "entry 1.mp4": "CAM_ENTRY_01",
+        "entry 2.mp4": "CAM_ENTRY_02",
+        "zone.mp4": "CAM_ZONE_01",
+        "billing_area.mp4": "CAM_BILLING_01"
+      },
+      "camera_roles": {
+        "entry 1.mp4": "entry",
+        "entry 2.mp4": "entry",
+        "zone.mp4": "floor",
+        "billing_area.mp4": "billing"
+      }
     }
-  ],
-  "open_hours": {
-    "start": "10:00",
-    "end": "21:00"
-  }
+  ]
 }

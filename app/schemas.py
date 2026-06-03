@@ -19,7 +19,7 @@ class EventMetadata(BaseModel):
     model_config = ConfigDict(extra='forbid')
     queue_depth: Optional[int] = None
     sku_zone: Optional[str] = None
-    session_seq: Optional[int] = None
+    session_seq: int = Field(..., ge=1)
     group_size: Optional[int] = None
 
 
@@ -48,6 +48,19 @@ class EventIn(BaseModel):
         event_type = info.data.get('event_type')
         if event_type in {'ZONE_ENTER', 'ZONE_EXIT', 'ZONE_DWELL', 'BILLING_QUEUE_JOIN', 'BILLING_QUEUE_ABANDON'} and not value:
             raise ValueError('zone_id is required for zone and billing events')
+        if event_type in {'ENTRY', 'EXIT', 'REENTRY'} and value is not None:
+            raise ValueError('zone_id must be null for ENTRY, EXIT, and REENTRY events')
+        return value
+
+    @field_validator('metadata')
+    def validate_event_metadata(cls, value, info):
+        event_type = info.data.get('event_type')
+        if event_type in {'ZONE_ENTER', 'ZONE_EXIT', 'ZONE_DWELL', 'BILLING_QUEUE_JOIN', 'BILLING_QUEUE_ABANDON'} and value.sku_zone is None:
+            raise ValueError('metadata.sku_zone is required for zone and billing events')
+        if event_type == 'BILLING_QUEUE_JOIN' and value.queue_depth is None:
+            raise ValueError('metadata.queue_depth is required for BILLING_QUEUE_JOIN')
+        if event_type in {'ENTRY', 'EXIT', 'REENTRY'} and value.sku_zone is not None:
+            raise ValueError('metadata.sku_zone must be null for ENTRY, EXIT, and REENTRY events')
         return value
 
 

@@ -17,14 +17,6 @@ EVENT_TYPES = {
     'REENTRY'
 }
 
-STORE_ALIAS = {
-    'ST1008': 'STORE_BLR_002',
-}
-
-
-def canonical_store_id(store_id: str) -> str:
-    return STORE_ALIAS.get(store_id, store_id)
-
 
 def _group_sessions(events: List[Dict]) -> Dict[str, List[Dict]]:
     sessions: Dict[str, List[Dict]] = defaultdict(list)
@@ -41,9 +33,8 @@ def _non_staff(events: List[Dict]) -> List[Dict]:
 
 
 def _load_transactions_for_store(store_id: str) -> List[Dict]:
-    store_id = canonical_store_id(store_id)
     raw = load_transactions()
-    return [t for t in raw if canonical_store_id(t.get('store_id', '')) == store_id]
+    return [t for t in raw if t.get('store_id') == store_id]
 
 
 def _build_conversion_map(events: List[Dict], store_id: str) -> Dict[str, bool]:
@@ -55,12 +46,17 @@ def _build_conversion_map(events: List[Dict], store_id: str) -> Dict[str, bool]:
         if any(e['event_type'] == 'PURCHASE' for e in items):
             purchases[session_key] = True
             continue
-        billing_windows[session_key] = [parse_timestamp(e['timestamp']) for e in items if e['event_type'] == 'BILLING_QUEUE_JOIN']
+        billing_windows[session_key] = [
+            parse_timestamp(e['timestamp'])
+            for e in items
+            if e.get('zone_id') == 'BILLING'
+        ]
     tx_times = [parse_timestamp(t['timestamp']) for t in transactions if t.get('timestamp')]
     for session_key, times in billing_windows.items():
         for bill_time in times:
             for txn in tx_times:
-                if 0 <= (txn - bill_time).total_seconds() <= 300:
+                elapsed = (txn - bill_time).total_seconds()
+                if 0 <= elapsed <= 300:
                     purchases[session_key] = True
                     break
             if purchases[session_key]:
@@ -144,16 +140,19 @@ def build_heatmap(store_id: str) -> Dict[str, object]:
     zone_stats: Dict[str, Dict[str, float]] = defaultdict(lambda: {'visits': 0, 'total_dwell': 0})
     sessions = _group_sessions(events)
     for event in events:
-        if event['event_type'] == 'ZONE_DWELL' and event['zone_id']:
+        # Count ZONE_ENTER for visit activity
+        if event['event_type'] == 'ZONE_ENTER' and event['zone_id']:
             zone_stats[event['zone_id']]['visits'] += 1
-            zone_stats[event['zone_id']]['total_dwell'] += event['dwell_ms']
+        # Also aggregate dwell time from ZONE_DWELL events if available
+        if event['event_type'] == 'ZONE_DWELL' and event['zone_id']:
+            zone_stats[event['zone_id']]['total_dwell'] += event.get('dwell_ms', 0)
     if not zone_stats:
         return {'zones': [], 'data_confidence': False}
     scores = [stats['visits'] for stats in zone_stats.values()]
     max_visits = max(scores) if scores else 1
     zones = []
     for zone_id, stats in zone_stats.items():
-        avg_dwell = round(stats['total_dwell'] / stats['visits'] / 1000, 2) if stats['visits'] else 0.0
+        avg_dwell = round(stats['total_dwell'] / stats['visits'] / 1000, 2) if stats['visits'] > 0 and stats['total_dwell'] > 0 else 0.0
         zones.append({
             'zone_id': zone_id,
             'visit_count': stats['visits'],

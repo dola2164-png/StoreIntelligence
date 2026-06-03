@@ -1,9 +1,9 @@
-<<<<<<< HEAD
+
 # Store Intelligence
 
 This repository implements a working Store Intelligence pipeline from raw CCTV clips to a live metrics API.
 
-## Store ID mapping is set as ST1008 → STORE_BLR_002(keep in mind)
+## Store ID in the sample dataset is ST1008
 
 ## What is included
 
@@ -40,6 +40,35 @@ cd pipeline
 ```
 
 The pipeline writes events to `data/events.jsonl`.
+
+## Replacing the dataset
+
+To update the repository with new store data, replace the contents of `data/` only and keep the repo code unchanged.
+
+1. Remove old data files:
+
+```powershell
+cd C:\Users\adaks\Downloads\store-intelligence\data
+Remove-Item CAM*.mp4 CAM*_heatmap.png store_layout.* transactions.csv events.* -Force -ErrorAction SilentlyContinue
+```
+
+2. Unzip the new files into `data/`:
+
+```powershell
+cd C:\Users\adaks\Downloads\store-intelligence
+Expand-Archive -Path .\store1.zip -DestinationPath .\data
+Expand-Archive -Path .\store2.zip -DestinationPath .\data
+```
+
+3. Make sure the camera filenames and layout config match the pipeline.
+
+- `data/store_layout.json` should include `camera_mapping` for the exact video filenames.
+- You can also add `camera_roles` in `store_layout.json` if filenames are not standard.
+- The pipeline now accepts all `*.mp4` files in `data/`.
+
+4. Copy the new POS feed to `data/transactions.csv`.
+
+5. Remove `data/events.jsonl` and `data/events.db` so the pipeline generates fresh events.
 
 ## Ingest events into the API
 
@@ -104,9 +133,12 @@ pytest -q
 
 ## Dashboard
 The live dashboard is available at:
-http://localhost:8000/dashboard
+- `http://localhost:8000/dashboard`
+- `http://localhost:8000/health`
+- `http://localhost:8000/stores/ST1008/metrics`
+- `http://localhost:8000/stores/ST1008/funnel`
+- `http://localhost:8000/stores/ST1008/heatmap`
+- `http://localhost:8000/stores/ST1008/anomalies`
 
 
-=======
-# StoreIntelligence
->>>>>>> 5f6da28890046b3c07aaba67cb63cc4ab75e47c0
+

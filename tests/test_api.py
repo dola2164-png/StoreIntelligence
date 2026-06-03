@@ -1,7 +1,9 @@
-# PROMPT: Extend API tests for session correctness, conversion, anomalies, and live dashboard coverage.
+# PROMPT: Validate API behavior for ingest, metrics, analytics, and graceful service degradation.
+# Use test-driven coverage to document stable ingestion, duplicate handling, and 503 database fallback.
 
 import os
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,6 +15,7 @@ from app.db import get_connection
 from app.main import app
 
 client = TestClient(app)
+STORE_ID = 'ST1008'
 
 
 def reset_db():
@@ -37,7 +40,7 @@ def ingest(events):
 def make_event(event_id, visitor_id, event_type, timestamp, session_seq, **kwargs):
     return {
         'event_id': event_id,
-        'store_id': 'STORE_BLR_002',
+        'store_id': STORE_ID,
         'camera_id': kwargs.get('camera_id', 'CAM_ENTRY_01'),
         'visitor_id': visitor_id,
         'event_type': event_type,
@@ -77,13 +80,13 @@ def test_entry_exit_session_and_purchase_conversion():
         make_event('session-1-entry', 'VIS_1', 'ENTRY', now.isoformat().replace('+00:00', 'Z'), 1),
         make_event('session-1-zone-enter', 'VIS_1', 'ZONE_ENTER', (now + timedelta(seconds=10)).isoformat().replace('+00:00', 'Z'), 1, zone_id='SKINCARE', sku_zone='MOISTURISER'),
         make_event('session-1-dwell', 'VIS_1', 'ZONE_DWELL', (now + timedelta(seconds=40)).isoformat().replace('+00:00', 'Z'), 1, zone_id='SKINCARE', dwell_ms=30000, sku_zone='MOISTURISER'),
-        make_event('session-1-billing', 'VIS_1', 'BILLING_QUEUE_JOIN', (now + timedelta(minutes=5)).isoformat().replace('+00:00', 'Z'), 1, zone_id='BILLING', queue_depth=1),
+        make_event('session-1-billing', 'VIS_1', 'BILLING_QUEUE_JOIN', (now + timedelta(minutes=5)).isoformat().replace('+00:00', 'Z'), 1, zone_id='BILLING', queue_depth=1, sku_zone='BILLING'),
         make_event('session-1-purchase', 'VIS_1', 'PURCHASE', (now + timedelta(minutes=6)).isoformat().replace('+00:00', 'Z'), 1),
     ]
     ingest(events)
 
-    metrics = client.get('/stores/STORE_BLR_002/metrics').json()
-    funnel = client.get('/stores/STORE_BLR_002/funnel').json()
+    metrics = client.get(f'/stores/{STORE_ID}/metrics').json()
+    funnel = client.get(f'/stores/{STORE_ID}/funnel').json()
 
     assert metrics['unique_visitors'] == 1
     assert metrics['session_count'] == 1
@@ -102,7 +105,7 @@ def test_reentry_and_staff_exclusion():
     ]
     ingest(events)
 
-    metrics = client.get('/stores/STORE_BLR_002/metrics').json()
+    metrics = client.get(f'/stores/{STORE_ID}/metrics').json()
     assert metrics['unique_visitors'] == 1
     assert metrics['session_count'] == 2
     assert metrics['conversion_rate'] == 0.0
@@ -112,18 +115,18 @@ def test_funnel_accuracy_with_held_out_events():
     now = datetime.now(timezone.utc)
     events = [
         make_event('hold-1-entry', 'VIS_A', 'ENTRY', now.isoformat().replace('+00:00', 'Z'), 1),
-        make_event('hold-1-zone', 'VIS_A', 'ZONE_ENTER', (now + timedelta(seconds=10)).isoformat().replace('+00:00', 'Z'), 1, zone_id='SKINCARE'),
+        make_event('hold-1-zone', 'VIS_A', 'ZONE_ENTER', (now + timedelta(seconds=10)).isoformat().replace('+00:00', 'Z'), 1, zone_id='SKINCARE', sku_zone='SKINCARE'),
         make_event('hold-1-purchase', 'VIS_A', 'PURCHASE', (now + timedelta(minutes=4)).isoformat().replace('+00:00', 'Z'), 1),
 
         make_event('hold-2-entry', 'VIS_B', 'ENTRY', (now + timedelta(minutes=5)).isoformat().replace('+00:00', 'Z'), 1),
-        make_event('hold-2-zone', 'VIS_B', 'ZONE_ENTER', (now + timedelta(minutes=5, seconds=10)).isoformat().replace('+00:00', 'Z'), 1, zone_id='COSMETICS'),
-        make_event('hold-2-billing', 'VIS_B', 'BILLING_QUEUE_JOIN', (now + timedelta(minutes=6)).isoformat().replace('+00:00', 'Z'), 1, zone_id='BILLING', queue_depth=2),
+        make_event('hold-2-zone', 'VIS_B', 'ZONE_ENTER', (now + timedelta(minutes=5, seconds=10)).isoformat().replace('+00:00', 'Z'), 1, zone_id='COSMETICS', sku_zone='COSMETICS'),
+        make_event('hold-2-billing', 'VIS_B', 'BILLING_QUEUE_JOIN', (now + timedelta(minutes=6)).isoformat().replace('+00:00', 'Z'), 1, zone_id='BILLING', queue_depth=2, sku_zone='BILLING'),
 
         make_event('hold-3-entry', 'VIS_C', 'ENTRY', (now + timedelta(minutes=10)).isoformat().replace('+00:00', 'Z'), 1),
     ]
     ingest(events)
 
-    funnel = client.get('/stores/STORE_BLR_002/funnel').json()
+    funnel = client.get(f'/stores/{STORE_ID}/funnel').json()
     assert funnel['stages'][0]['count'] == 3
     assert funnel['stages'][1]['count'] == 2
     assert funnel['stages'][2]['count'] == 1
@@ -141,12 +144,25 @@ def test_purchase_event_and_group_metadata():
     result = ingest([event])
     assert result['accepted'] == 1
 
-    metrics = client.get('/stores/STORE_BLR_002/metrics').json()
-    funnel = client.get('/stores/STORE_BLR_002/funnel').json()
+    metrics = client.get(f'/stores/{STORE_ID}/metrics').json()
+    funnel = client.get(f'/stores/{STORE_ID}/funnel').json()
 
     assert metrics['session_count'] == 1
     assert metrics['conversion_rate'] == 100.0
     assert funnel['stages'][3]['count'] == 1
+
+
+def test_pos_transaction_correlation_counts_billing_zone_visitors():
+    # Use a known POS transaction timestamp in the sample data for ST1008
+    billing_visit = '2026-04-10T16:52:30Z'
+    events = [
+        make_event('pos-visit-1', 'VIS_POS_1', 'BILLING_QUEUE_JOIN', billing_visit, 1, zone_id='BILLING', queue_depth=1, sku_zone='BILLING'),
+    ]
+    ingest(events)
+
+    metrics = client.get(f'/stores/{STORE_ID}/metrics').json()
+    assert metrics['session_count'] == 1
+    assert metrics['conversion_rate'] == 100.0
 
 
 def test_anomaly_cases_for_queue_spike_and_conversion_drop():
@@ -154,15 +170,15 @@ def test_anomaly_cases_for_queue_spike_and_conversion_drop():
     older = now - timedelta(minutes=45)
     events = [
         make_event('an-1-entry', 'VIS_10', 'ENTRY', older.isoformat().replace('+00:00', 'Z'), 1),
-        make_event('an-1-billing', 'VIS_10', 'BILLING_QUEUE_JOIN', older.isoformat().replace('+00:00', 'Z'), 1, zone_id='BILLING', queue_depth=1),
+        make_event('an-1-billing', 'VIS_10', 'BILLING_QUEUE_JOIN', older.isoformat().replace('+00:00', 'Z'), 1, zone_id='BILLING', queue_depth=1, sku_zone='BILLING'),
     ]
     for i in range(4):
         ts = (now - timedelta(minutes=10) + timedelta(seconds=i * 30)).isoformat().replace('+00:00', 'Z')
-        events.append(make_event(f'an-recent-{i}', f'VIS_R{i}', 'BILLING_QUEUE_JOIN', ts, 1, zone_id='BILLING', queue_depth=1))
-    events.append(make_event('an-recent-spike', 'VIS_R5', 'BILLING_QUEUE_JOIN', now.isoformat().replace('+00:00', 'Z'), 1, zone_id='BILLING', queue_depth=5))
+        events.append(make_event(f'an-recent-{i}', f'VIS_R{i}', 'BILLING_QUEUE_JOIN', ts, 1, zone_id='BILLING', queue_depth=1, sku_zone='BILLING'))
+    events.append(make_event('an-recent-spike', 'VIS_R5', 'BILLING_QUEUE_JOIN', now.isoformat().replace('+00:00', 'Z'), 1, zone_id='BILLING', queue_depth=5, sku_zone='BILLING'))
     ingest(events)
 
-    anomalies = client.get('/stores/STORE_BLR_002/anomalies').json()
+    anomalies = client.get(f'/stores/{STORE_ID}/anomalies').json()
     types = {item['type'] for item in anomalies}
     assert 'CONVERSION_DROP' in types
     assert 'QUEUE_SPIKE' in types
@@ -181,3 +197,16 @@ def test_health_endpoint_returns_status():
     payload = response.json()
     assert 'status' in payload
     assert 'stale_feed' in payload
+
+
+def test_ingest_returns_503_when_db_unavailable(monkeypatch):
+    def fail_connection():
+        raise sqlite3.DatabaseError('Simulated database unavailable')
+
+    monkeypatch.setattr('app.storage.get_connection', fail_connection)
+    event = make_event('db-down-event', 'VIS_1', 'ENTRY', '2026-04-25T12:00:00Z', 1)
+    response = client.post('/events/ingest', json={'events': [event]})
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload['detail'] == 'Database unavailable'
+    assert payload['error'] == 'SERVICE_UNAVAILABLE'
