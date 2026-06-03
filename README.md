@@ -114,6 +114,10 @@ A validation fixture dataset is available at `tests/fixtures/validation_events.j
 ```bash
 pytest -q
 ```
+```bash
+python -m pytest tests/test_coverage_gaps.py -v --cov=app --cov-report=term-missing
+```
+
 ## Requirements:
 - fastapi
 - uvicorn
