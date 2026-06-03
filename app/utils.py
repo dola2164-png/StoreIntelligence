@@ -1,11 +1,23 @@
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
-
 import csv
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
+
+
+def normalize_store_id(store_id: str) -> str:
+    """
+    Standardizes store identifiers by extracting digits and building a uniform token.
+    Maps patterns like 'store_1076' and 'ST1076' to 'ST1076'.
+    """
+    if not store_id or not isinstance(store_id, str):
+        return store_id
+    digits = "".join(c for c in store_id if c.isdigit())
+    if digits:
+        return f"ST{digits}"
+    return store_id.strip().upper()
 
 
 def parse_timestamp(timestamp: str) -> datetime:
@@ -33,8 +45,12 @@ def load_transactions() -> list[Dict[str, str]]:
         reader = csv.DictReader(f)
         transactions = []
         for row in reader:
-            if not row.get('store_id'):
+            raw_store = row.get('store_id', '')
+            if not raw_store:
                 continue
+            # Ensure POS store ids are normalized perfectly
+            row['store_id'] = normalize_store_id(raw_store)
+            
             order_date = row.get('order_date', '').strip()
             order_time = row.get('order_time', '').strip()
             timestamp = None
