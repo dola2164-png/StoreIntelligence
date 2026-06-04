@@ -23,6 +23,8 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
+<img width="1920" height="1200" alt="image" src="https://github.com/user-attachments/assets/5346fe58-a584-4c75-834e-a035934b6e1f" />
+
 
 ## Run the API
 
